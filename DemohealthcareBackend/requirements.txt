@@ -1,0 +1,14 @@
+fastapi
+astrapy
+pydantic
+pydantic[email]
+python-dotenv
+apscheduler
+python-jose
+uvicorn
+argon2-cffi
+passlib
+requests
+email-validator
+httpx
+resend
