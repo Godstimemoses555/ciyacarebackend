@@ -8,7 +8,7 @@ from model import User, Login, Payment, Appointment,Upcoming,Prescription1,Rewar
 from utility import hashedpassword,verifyhash,send_test_email,mainhtml,generate_otp
 import httpx
 import uuid
-
+from apscheduler.schedulers.background import BackgroundScheduler
 app = FastAPI()
 
 load_dotenv()
@@ -37,13 +37,32 @@ db = client.get_database_by_api_endpoint(
   "https://0a0c8492-98e6-4b38-a074-fac244e3aab8-us-east-2.apps.astra.datastax.com"
 )
 
-user_collection = db.create_collection("users")
-appointment_collection = db.create_collection("appointments")
-payment_collection = db.create_collection("payments")
-new_appointment_collection = db.create_collection("new_appointment")
+user_collection = db.get_collection("users")
+appointment_collection = db.get_collection("appointments")
+payment_collection = db.get_collection("payments")
+new_appointment_collection = db.get_collection("new_appointment")
 
-print(f"Connected to Astra DB: {db.list_collection_names()}")
+# print(f"Connected to Astra DB: {db.list_collection_names()}")
 
+scheduler = BackgroundScheduler()
+
+def ping_db():
+    try:
+        # A simple query to keep the database awake
+        db.list_collection_names()
+        print("Database ping successful to keep it awake.")
+    except Exception as e:
+        print(f"Database ping failed: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    scheduler.add_job(ping_db, 'interval', minutes=10) # 10 minutes interval
+    scheduler.start()
+    print("Database ping scheduler started.")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    scheduler.shutdown()
 
 @app.post("/register")
 async def register(user: User):
