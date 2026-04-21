@@ -1,11 +1,11 @@
-from fastapi import FastAPI,status
+from fastapi import FastAPI,status,Response
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from dotenv import load_dotenv
 from astrapy import DataAPIClient 
 from model import User, Login, Payment, Appointment,Upcoming,Prescription1,RewardPoint,AppointmentRequest, ContactForm
-from utility import hashedpassword,verifyhash,send_test_email,mainhtml,generate_otp
+from utility import hashedpassword,verifyhash,send_test_email,mainhtml,generate_otp,access_token,refresh_token
 import httpx
 import uuid
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -87,23 +87,70 @@ async def contact_us(form: ContactForm):
         return JSONResponse(content={"message": "failed to send email"}, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @app.post("/login")
-async def login(login: Login):
+async def login(login: Login,response:Response):
     data = dict(login)
     print(data)
     # Correct filter: {"email": data["email"]} instead of {data["email"]}
     user = user_collection.find_one({"email": data["email"]})
     
     if user and verifyhash(user["password"], data["password"]):
+        del user["password"]
+        access=access_token(user)
+
+
+        response.set_cookie(
+            key="access_token",
+            value=access,
+            httponly=True,
+            secure=True,
+            max_age=60*5,
+            
+        )
+        user.pop("refresh_token", None)
+        refresh_user=refresh_token(user)
         otp = generate_otp()
         send_test_email(data["email"], "Verify Your Email", f"Your OTP is {otp}")
         # Correct filter here too
-        user_collection.update_one({"email": data["email"]}, {"$set": {"otp": otp}})
-        return JSONResponse(content={"message": "user logged in successfully", "user_id": str(user["_id"])}, status_code=status.HTTP_200_OK)
+        user_collection.update_one({"email": data["email"]}, {"$set": {"otp": otp, "refresh_token": refresh_user}})
+        return JSONResponse(content={"message": "user logged in successfully", "access_token":access,"refresh_token":refresh_user,"user_id":str(user["_id"])}, status_code=status.HTTP_200_OK)
     else:
         return JSONResponse(content={"message": "invalid email or password"}, status_code=status.HTTP_401_UNAUTHORIZED)
 
 
 
+
+@app.post("/refresh")
+async def refresh_token_endpoint(data: dict):
+    # Expect data to be {"refresh_token": "eyJ..."}
+    supplied_token = data.get("refresh_token")
+    if not supplied_token:
+        return JSONResponse(content={"message": "Refresh token is missing"}, status_code=status.HTTP_400_BAD_REQUEST)
+        
+    from utility import decode_token
+    payload = decode_token(supplied_token)
+    
+    if not payload:
+        return JSONResponse(content={"message": "Refresh token expired or invalid"}, status_code=status.HTTP_401_UNAUTHORIZED)
+        
+    user_id = payload.get("_id")
+    # Because payload("_id") is converted to string in JWT but might be stored differently, ensure a proper match
+    user = user_collection.find_one({"_id": user_id})
+    
+    if not user:
+        return JSONResponse(content={"message": "User not found"}, status_code=status.HTTP_404_NOT_FOUND)
+        
+    # Verify the database has the same refresh token
+    if user.get("refresh_token") != supplied_token:
+        return JSONResponse(content={"message": "Invalid refresh token"}, status_code=status.HTTP_401_UNAUTHORIZED)
+        
+    # Generate a brand new access token
+    new_access = access_token(user)
+    
+    # Return it to the frontend!
+    return JSONResponse(content={"access_token": new_access}, status_code=status.HTTP_200_OK)
+
+
+    
 @app.post("/verify")
 async def verify(token: str):
     data = user_collection.find_one({"_id": token})

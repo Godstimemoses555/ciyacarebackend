@@ -4,6 +4,9 @@ import secrets
 from htmlmessage import mainhtml
 import os
 import resend
+from jose import jwt,JWTError
+from datetime import datetime, timedelta
+
 
 
 
@@ -23,9 +26,33 @@ def verifyhash(hashedpassword,password):
 load_dotenv()
 
 
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
+ALGORITHM = "HS256"
+# ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+def access_token(data: dict, minutes: int = 5):
+    payload = data.copy()
+    payload["exp"]  = datetime.utcnow() + timedelta(minutes=minutes)
+
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
+def refresh_token(data: dict, minutes: int = 60):
+    payload = data.copy()
+    payload["exp"] = datetime.utcnow() + timedelta(minutes=minutes)
 
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except JWTError:
+        return None
+ 
 # Load the API key from your .env
 resend.api_key = os.getenv("RESEND_API_KEY")
 def send_test_email(receiver_email, subject, body):
