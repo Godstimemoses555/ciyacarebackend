@@ -15,7 +15,7 @@ load_dotenv()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*","https://react-pro-csoq-rbfm301wj-godstime-moses-projects.vercel.app/"],
     allow_credentials=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
