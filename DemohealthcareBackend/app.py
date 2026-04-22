@@ -1,15 +1,29 @@
-from fastapi import FastAPI,status,Response
+from fastapi import FastAPI,status,Response, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from dotenv import load_dotenv
 from astrapy import DataAPIClient 
 from model import User, Login, Payment, Appointment,Upcoming,Prescription1,RewardPoint,AppointmentRequest, ContactForm
-from utility import hashedpassword,verifyhash,send_test_email,mainhtml,generate_otp,access_token,refresh_token
+from utility import hashedpassword,verifyhash,send_test_email,mainhtml,generate_otp,access_token,refresh_token,decode_token
 import httpx
 import uuid
 from apscheduler.schedulers.background import BackgroundScheduler
 app = FastAPI()
+
+security_scheme = HTTPBearer()
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security_scheme)):
+    token = credentials.credentials
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token expired or invalid",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    return payload
 
 load_dotenv()
 
@@ -185,7 +199,7 @@ def active_users():
 async def delete(email:str):
     user = user_collection.find_one({"email":email})
     if user:
-        user_collection.delete_many({"email":email},{"$set":{"is_active":False}})
+        user_collection.update_one({"email":email},{"$set":{"is_active":False}})
         return JSONResponse(content={"message":"user deleted sucessfully"},status_code=status.HTTP_200_OK)
     else:
         return JSONResponse(content={"message":"user not found"},status_code=status.HTTP_404_NOT_FOUND)
@@ -193,7 +207,7 @@ async def delete(email:str):
 
 
 @app.post("/Paymentgateway")
-async def paymentgateway(payment_data: Payment):
+async def paymentgateway(payment_data: Payment, current_user: dict = Depends(get_current_user)):
     print("DEBUG: Starting PaymentGateway...")
     try:
         # 1. Verify user exists in Astra DB (by ID or Email)
@@ -320,7 +334,7 @@ async def verify_payment(transaction_id: str, user_id: str):
     
 
 @app.post("/appointment")
-async def register_appointment(appointment: Appointment):
+async def register_appointment(appointment: Appointment, current_user: dict = Depends(get_current_user)):
     data = dict(appointment)
     data["status"] = "Pending" # Default status
     print(data)
@@ -331,7 +345,7 @@ async def register_appointment(appointment: Appointment):
         return JSONResponse(content={"message":"appointment booking failed"},status_code=status.HTTP_400_BAD_REQUEST)
 
 @app.post("/total_appointment")
-async def total_appointment(request: AppointmentRequest):
+async def total_appointment(request: AppointmentRequest, current_user: dict = Depends(get_current_user)):
     user_id = request.user_id
 
     main_user = user_collection.find_one({"_id": user_id})
@@ -353,7 +367,7 @@ async def total_appointment(request: AppointmentRequest):
 
 
 @app.post("/upcoming_test")
-async def upcoming_test(request: Upcoming):
+async def upcoming_test(request: Upcoming, current_user: dict = Depends(get_current_user)):
     user_id = request.user_id
     appointment_id = request.appointment_id
 
@@ -382,7 +396,7 @@ async def upcoming_test(request: Upcoming):
 
 
 @app.post("/prescription")
-async def prescription_endpoint(request: Prescription1):
+async def prescription_endpoint(request: Prescription1, current_user: dict = Depends(get_current_user)):
     user_id = request.user_id
     appointment_id = request.appointment_id
 
@@ -411,7 +425,7 @@ async def prescription_endpoint(request: Prescription1):
 
 
 @app.post("/reward_point")
-async def reward_point_endpoint(request: RewardPoint):
+async def reward_point_endpoint(request: RewardPoint, current_user: dict = Depends(get_current_user)):
     user_id = request.user_id
 
     main_user = user_collection.find_one({"_id": user_id})
@@ -433,7 +447,7 @@ async def reward_point_endpoint(request: RewardPoint):
 
 
 @app.post("/new_appointment")
-async def new_appointment(request: AppointmentRequest):
+async def new_appointment(request: AppointmentRequest, current_user: dict = Depends(get_current_user)):
     user_id = request.user_id
 
     main_user = user_collection.find_one({"_id": user_id})
@@ -455,7 +469,7 @@ async def new_appointment(request: AppointmentRequest):
 
 
 @app.get("/dashboard_data/{user_id}")
-async def get_dashboard_data(user_id: str):
+async def get_dashboard_data(user_id: str, current_user: dict = Depends(get_current_user)):
     user = user_collection.find_one({"_id": user_id})
     if not user:
         return JSONResponse(content={"message": "user not found"}, status_code=status.HTTP_404_NOT_FOUND)
@@ -502,7 +516,7 @@ async def get_dashboard_data(user_id: str):
 
 
 @app.post("/logout")
-async def logout(request: AppointmentRequest):
+async def logout(request: AppointmentRequest, current_user: dict = Depends(get_current_user)):
     user_id = request.user_id
     print("Logging out user_id:", user_id)
     # the user is found using _id, not email since frontend only supplies user_id
